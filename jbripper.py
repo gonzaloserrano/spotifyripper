@@ -9,9 +9,10 @@ import threading
 import time
 
 playback = False # set if you want to listen to the tracks that are currently ripped (start with "padsp ./jbripper.py ..." if using pulse audio)
-
+output_folder = os.getcwd() + "/download/" # change if you want to change output folder
 pipe = None
 ripping = False
+skipping = False
 end_of_track = threading.Event()
 
 def printstr(str): # print without newline
@@ -22,23 +23,34 @@ def shell(cmdline): # execute shell commands (unicode support)
     call(cmdline, shell=True)
 
 def rip_init(session, track):
-    global pipe, ripping
+    global pipe, ripping, skipping, output_folder
     num_track = "%02d" % (track.index(),)
     mp3file = track.name()+".mp3"
-    directory = os.getcwd() + "/" + track.artists()[0].name() + "/" + track.album().name() + "/"
-    if not os.path.exists(directory):
-        os.makedirs(directory)
-    printstr("ripping " + mp3file + " ...")
-    p = Popen("lame --silent -V2 -h -r - \""+ directory + mp3file+"\"", stdin=PIPE, shell=True)
-    pipe = p.stdin
-    ripping = True
+    directory = output_folder + track.artists()[0].name() + "/" + track.album().name() + "/"
+    if not os.path.isfile(directory+mp3file):
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+        printstr("ripping " + mp3file + " ...")
+        p = Popen("lame --silent -V2 -h -r - \""+ directory + mp3file+"\"", stdin=PIPE, shell=True)
+        pipe = p.stdin
+        ripping = True
+        f = open("ripping.status",'w')
+        f.write(num_track+"|"+track.artists()[0].name()+"|"+track.album().name()+"|"+directory+mp3file)
+        f.close()
+    else:
+        printstr("skipping " + mp3file + " (already exists)")
+        skipping = True
+	
 
 def rip_terminate(session, track):
     global ripping
     if pipe is not None:
         print(' done!')
         pipe.close()
-    ripping = False    
+    ripping = False
+    f = open("ripping.status",'w')
+    f.write("")
+    f.close()
 
 def rip(session, frames, frame_size, num_frames, sample_type, sample_rate, channels):
     if ripping:
@@ -46,13 +58,14 @@ def rip(session, frames, frame_size, num_frames, sample_type, sample_rate, chann
         pipe.write(frames);
 
 def rip_id3(session, track): # write ID3 data
+    global output_folder
     num_track = "%02d" % (track.index(),)
     mp3file = track.name()+".mp3"
     artist = track.artists()[0].name()
     album = track.album().name()
     title = track.name()
     year = track.album().year()
-    directory = os.getcwd() + "/" + track.artists()[0].name() + "/" + track.album().name() + "/"
+    directory =  output_folder + track.artists()[0].name() + "/" + track.album().name() + "/"
 
     # download cover
     image = session.image_create(track.album().cover())
@@ -83,6 +96,7 @@ class RipperThread(threading.Thread):
         self.ripper = ripper
 
     def run(self):
+        global skipping
         # wait for container
         container_loaded.wait()
         container_loaded.clear()
@@ -103,18 +117,20 @@ class RipperThread(threading.Thread):
         # ripping loop
         session = self.ripper.session
         for track in itrack:
-            
                 self.ripper.load_track(track)
 
                 rip_init(session, track)
 
-                self.ripper.play()
-
-                end_of_track.wait()
-                end_of_track.clear() # TODO check if necessary
-
-                rip_terminate(session, track)
-                rip_id3(session, track)
+                if not skipping:
+                    self.ripper.play()
+                    end_of_track.wait()
+                    end_of_track.clear() # TODO check if necessary
+                    rip_terminate(session, track)
+                    rip_id3(session, track)
+                else:
+                    rip_terminate(session, track)
+                    skipping = False
+                print('\n\n')
 
         self.ripper.disconnect()
 
