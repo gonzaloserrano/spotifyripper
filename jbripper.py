@@ -37,18 +37,18 @@ def rip_init(session, track):
     
     if os.path.isfile(fullpath):
         if isMp3Valid(fullpath):
-            printstr("skipping " + mp3file + " (already exists)")
+            print("skipping " + mp3file + " (already exists)")
             skipping = True  
         else:
-            printstr("repeating " + mp3file + " (file corrupt)")
+            print("repeating " + mp3file + " (file corrupt)")
             skipping = False
     else:
+        print("ripping " + mp3file + " ...")
         skipping = False
         
     if not skipping:
         if not os.path.exists(directory):
             os.makedirs(directory)
-        printstr("ripping " + mp3file + " ...")
         p = Popen("lame --silent -V2 -h -r - \""+ fullpath +"\"", stdin=PIPE, shell=True)
         pipe = p.stdin
         ripping = True
@@ -286,7 +286,7 @@ class Ripper(Jukebox):
     def __init__(self, *a, **kw):
         Jukebox.__init__(self, *a, **kw)
         self.ui = RipperThread(self) # replace JukeboxUI
-        self.session.set_preferred_bitrate(2) # 320 bps
+        self.session.set_preferred_bitrate(1) # 160 bps
 
     def music_delivery_safe(self, session, frames, frame_size, num_frames, sample_type, sample_rate, channels):
         rip(session, frames, frame_size, num_frames, sample_type, sample_rate, channels)
