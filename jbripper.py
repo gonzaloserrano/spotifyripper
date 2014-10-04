@@ -2,7 +2,7 @@
 # -*- coding: utf8 -*-
 
 from subprocess import call, Popen, PIPE
-from spotify import Link, Image
+from spotify import Link
 from jukebox import Jukebox, container_loaded
 import os, sys
 import threading
@@ -14,10 +14,12 @@ pipe = None
 ripping = False
 skipping = False
 end_of_track = threading.Event()
+#playlist
 
 def track_name(track):
-    return track.artists()[0].name()+ " - " +track.name()+".mp3" #track.name()+".mp3"
-    
+    track_name = track.artists()[0].name()+ " - " +track.name()+".mp3" #track.name()+".mp3"
+    return track_name.encode('ascii', 'ignore')
+
 def folder_name(track):
     return "/" #track.artists()[0].name() + "/" + track.album().name()
 
@@ -28,24 +30,27 @@ def printstr(str): # print without newline
 def shell(cmdline): # execute shell commands (unicode support)
     call(cmdline, shell=True)
 
-def rip_init(session, track):
+def rip_init(session, track, playlist_dir, track_num):
     global pipe, ripping, skipping, output_folder
     num_track = "%02d" % (track.index(),)
-    mp3file = track_name(track) 
-    directory = output_folder + folder_name(track) + "/"
+    directory = output_folder + playlist_dir # + folder_name(track) + "/"
+    directory = directory.encode('ascii', 'ignore')
+    mp3file = track_name(track)
+    if playlist_dir != "":
+        mp3file = str(track_num).zfill(2) + " - " + mp3file
     fullpath = directory+mp3file
-    
+
     if os.path.isfile(fullpath):
         if isMp3Valid(fullpath):
             print("skipping " + mp3file + " (already exists)")
-            skipping = True  
+            skipping = True
         else:
             print("repeating " + mp3file + " (file corrupt)")
             skipping = False
     else:
         print("ripping " + mp3file + " ...")
         skipping = False
-        
+
     if not skipping:
         if not os.path.exists(directory):
             os.makedirs(directory)
@@ -55,8 +60,8 @@ def rip_init(session, track):
         f = open("ripping.status",'w')
         f.write(num_track+"|"+folder_name(track)+"|"+fullpath)
         f.close()
-    
-	
+
+
 
 def rip_terminate(session, track):
     global ripping
@@ -72,14 +77,14 @@ def rip(session, frames, frame_size, num_frames, sample_type, sample_rate, chann
     if ripping:
         printstr('.')
         pipe.write(frames);
-        
+
 def rip_id3(session, track): # write ID3 data
     global output_folder
     num_track = "%02d" % (track.index(),)
-    mp3file = track_name(track)
-    artist = track.artists()[0].name()
-    album = track.album().name()
-    title = track.name()
+    mp3file = track_name(track).encode('ascii', 'ignore')
+    artist = track.artists()[0].name().encode('ascii', 'ignore')
+    album = track.album().name().encode('ascii', 'ignore')
+    title = track.name().encode('ascii', 'ignore')
     year = track.album().year()
     directory =  output_folder + folder_name(track) + "/"
 
@@ -104,7 +109,7 @@ def rip_id3(session, track): # write ID3 data
     shell(cmd)
 
     # delete cover
-    shell("rm -f cover.jpg")    
+    shell("rm -f cover.jpg")
 
 def isMp3Valid(file_path):
     is_valid = False
@@ -117,22 +122,21 @@ def isMp3Valid(file_path):
         block = f.read(1024)
         frame_start = block.find(chr(255))
         block_count+=1
-        
+
     if frame_start > -1:
         frame_hdr = block[frame_start:frame_start+4]
         is_valid = frame_hdr[0] == chr(255)
-        
+
         mpeg_version = ''
         layer_desc = ''
-        uses_crc = False
         bitrate = 0
         sample_rate = 0
         padding = False
         frame_length = 0
-        
+
         if is_valid:
             is_valid = ord(frame_hdr[1]) & 0xe0 == 0xe0 #validate the rest of the frame_sync bits exist
-            
+
         if is_valid:
             if ord(frame_hdr[1]) & 0x18 == 0:
                 mpeg_version = '2.5'
@@ -142,7 +146,7 @@ def isMp3Valid(file_path):
                 mpeg_version = '1'
             else:
                 is_valid = False
-            
+
         if is_valid:
             if ord(frame_hdr[1]) & 6 == 2:
                 layer_desc = 'Layer III'
@@ -152,10 +156,8 @@ def isMp3Valid(file_path):
                 layer_desc = 'Layer I'
             else:
                 is_valid = False
-        
+
         if is_valid:
-            uses_crc = ord(frame_hdr[1]) & 1 == 0
-            
             bitrate_chart = [
                 [0,0,0,0,0],
                 [32,32,32,32,8],
@@ -191,7 +193,7 @@ def isMp3Valid(file_path):
                         bitrate_col = 4
                 bitrate = bitrate_chart[bitrate_index][bitrate_col]
                 is_valid = bitrate > 0
-        
+
         if is_valid:
             sample_rate_chart = [
                 [44100, 22050, 11025],
@@ -209,10 +211,10 @@ def isMp3Valid(file_path):
                 sample_rate = sample_rate_chart[sample_rate_index][sample_rate_col]
             else:
                 is_valid = False
-        
+
         if is_valid:
             padding = ord(frame_hdr[2]) & 2
-            
+
             padding_length = 0
             if layer_desc == 'Layer I':
                 if padding:
@@ -223,7 +225,7 @@ def isMp3Valid(file_path):
                     padding_length = 1
                 frame_length = 144 * bitrate * 1000 / sample_rate + padding_length
             is_valid = frame_length > 0
-            
+
             # Verify the next frame
             if(frame_start + frame_length < len(block)):
                 is_valid = block[frame_start + frame_length] == chr(255)
@@ -234,7 +236,7 @@ def isMp3Valid(file_path):
                     is_valid = block[offset] == chr(255)
                 else:
                     is_valid = False
-        
+
     f.close()
     return is_valid
 
@@ -251,12 +253,14 @@ class RipperThread(threading.Thread):
 
         # create track iterator
         link = Link.from_string(sys.argv[3])
+        playlist_dir = ""
         if link.type() == Link.LINK_TRACK:
             track = link.as_track()
             itrack = iter([track])
         elif link.type() == Link.LINK_PLAYLIST:
             playlist = link.as_playlist()
-            print('loading playlist ...')
+            playlist_dir = playlist.name() + "/"
+            print('loading playlist "' + playlist.name() + '"...')
             while not playlist.is_loaded():
                 time.sleep(0.1)
             print('done')
@@ -264,10 +268,11 @@ class RipperThread(threading.Thread):
 
         # ripping loop
         session = self.ripper.session
+        i = 1
         for track in itrack:
                 self.ripper.load_track(track)
 
-                rip_init(session, track)
+                rip_init(session, track, playlist_dir, i)
 
                 if not skipping:
                     self.ripper.play()
@@ -279,6 +284,7 @@ class RipperThread(threading.Thread):
                     rip_terminate(session, track)
                     skipping = False
                 print('\n\n')
+                i = i + 1
 
         self.ripper.disconnect()
 
@@ -301,12 +307,12 @@ class Ripper(Jukebox):
 
 
 if __name__ == '__main__':
-	if len(sys.argv) >= 3:
-		ripper = Ripper(sys.argv[1],sys.argv[2]) # login
-		ripper.connect()
-	else:
-		print "usage : \n"
-		print "	  ./jbripper.py [username] [password] [spotify_url]"
-		print "example : \n"
-	 	print "   ./jbripper.py user pass spotify:track:52xaypL0Kjzk0ngwv3oBPR - for a single file"
-		print "   ./jbripper.py user pass spotify:user:username:playlist:4vkGNcsS8lRXj4q945NIA4 - rips entire playlist"
+    if len(sys.argv) >= 3:
+        ripper = Ripper(sys.argv[1],sys.argv[2]) # login
+        ripper.connect()
+    else:
+        print "usage : \n"
+        print "   ./jbripper.py [username] [password] [spotify_url]"
+        print "example : \n"
+        print "   ./jbripper.py user pass spotify:track:52xaypL0Kjzk0ngwv3oBPR - for a single file"
+        print "   ./jbripper.py user pass spotify:user:username:playlist:4vkGNcsS8lRXj4q945NIA4 - rips entire playlist"

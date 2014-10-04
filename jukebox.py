@@ -377,7 +377,7 @@ class Jukebox(SpotifySessionManager):
             self.stop()
         self.new_track_playing(track)
         self.session.load(track)
-        print "Loaded track: %s" % track.name()
+        print "Loaded track: %s" % track.name().encode('ascii', 'ignore')
 
     def load(self, playlist, track):
         if self.playing:
